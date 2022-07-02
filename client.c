@@ -25,10 +25,9 @@ typedef struct commandNode {
     struct commandNode* next;
 } commandNode;
 
-commandNode* headCommand = NULL;
+commandNode* headCommand = NULL; //FIFO
 int clientSocket;
 char* nameSocket = NULL;
-char* dirD = NULL;
 
 int setErrno(int result) {
     printf("result = %d \n", result);
@@ -123,16 +122,10 @@ int closeConnection(const char* sockname) {
             return setErrno(result);
         }
         result = atoi(answer);
-        if(result != 0) {
-            return setErrno(result);
-        }
         free(nameSocket);
         close(clientSocket);
-        return setErrno(result);
     }
-    else{
-        return setErrno(result);
-    }
+    return setErrno(result);
 }
 
 int openFile(const char* pathname, int flags) {
@@ -143,8 +136,7 @@ int openFile(const char* pathname, int flags) {
         return -1;
     }
     if(strlen(absPath) > 1024) {
-        result = -11;
-        return setErrno(result);
+        return setErrno(-11);
     }
     else {
         char request[REQUEST];
@@ -271,7 +263,7 @@ int closeFile(const char* pathname) {
 }
 
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname) {
-
+    return 1;
 }
 
 int main(int argc, char *argv[]) {
@@ -279,6 +271,7 @@ int main(int argc, char *argv[]) {
     int connected = 0;
     int t = 0;
     int p = 1;
+    char* dirD = NULL;
     while((opt = (char)getopt(argc, argv, "hf:W:w:D:d:r:R:l:u:c:t:p")) != -1) {
         switch (opt) {
             case('h'):
@@ -342,64 +335,60 @@ int main(int argc, char *argv[]) {
                     if(p == 1) {
                         printf("openFile(%s, %d) : %d \n", headCommand->path, O_CREATE | O_LOCK, result);
                     }
-                    if(result == 0) {
-                        result = writeFile(headCommand->path, dirD);
-                        if(p == 1) {
-                            printf("writeFile(%s, %s) : %d \n", headCommand->path, dirD, result);
-                        }
+                    if(result >= 0) {
                         if(result == 0) {
-                            result = closeFile(headCommand->path);
+                            result = writeFile(headCommand->path, dirD);
                             if(p == 1) {
-                                printf("closeFile(%s) : %d \n", headCommand->path, result);
+                                printf("writeFile(%s, %s) : %d", headCommand->path, dirD, result);
                             }
                             if(result == 0) {
+                                closeFile(headCommand->path);
+                                if(p == 1) {
+                                    printf("closeFile(%s) : %d", headCommand->path, result);
+                                }
+                                if(result != 0) {
+                                    perror("main.closeFile");
+                                }
                             }
                             else {
-                                perror("main.closeFile");
+                                perror("main.writeFile");
                             }
                         }
                         else {
-                            perror("main.writeFile");
-                        }
-                    }
-                    else {
-                        //perror("main.openFile");
-                    }
-                    if(result == 1) {
-                        FILE* append = fopen(headCommand->path, "r");
-                        if((append = fopen(headCommand->path, "r"))== NULL) {
-                            perror("main.fopen");
-                            exit(EXIT_FAILURE);
-                        }
-                        char data[DATA];
-                        char buffer[DATA];
-                        while (fgets(buffer, DATA, append)) {
-                            if(strlen(buffer) + strlen(data) + 1 < DATA) {
-                                strcat(data, buffer);
+                            FILE* append = fopen(headCommand->path, "r");
+                            if((append = fopen(headCommand->path, "r"))== NULL) {
+                                perror("main.fopen");
+                                exit(EXIT_FAILURE);
                             }
-                            else {
-                                setErrno(-11);
-                                perror("main.append");
+                            char data[DATA];
+                            memset(data, 0, DATA);
+                            char buffer[DATA];
+                            memset(buffer, 0, DATA);
+                            while (fgets(buffer, DATA, append)) {
+                                if(strlen(buffer) + strlen(data) + 1 < DATA) {
+                                    strcat(data, buffer);
+                                }
+                                else {
+                                    setErrno(-1);
+                                    perror("main.strlen");
+                                }
                             }
-                        }   
-                        fclose(append);
-                        result = appendToFile(headCommand->path, data, strlen(data), dirD);
-                        if(p == 1) {
-                            printf("appendToFile(%s, %s, %ld, %s) : %d \n", headCommand->path, data, strlen(data), dirD, result);
-                        }
-                        if(result == 0) {
-                            result = closeFile(headCommand->path);
+                            result = appendToFile(headCommand->path, data, strlen(data), dirD);
                             if(p == 1) {
-                                printf("closeFile(%s) : %d \n", headCommand->path, result);
+                                printf("appendToFile(%s, %s, %ld, %s) : %d \n", headCommand->path, data, strlen(data), dirD, result);
                             }
                             if(result == 0) {
+                                closeFile(headCommand->path);
+                                if(p == 1) {
+                                    printf("closeFile(%s) : %d", headCommand->path, result);
+                                }
+                                if(result != 0) {
+                                    perror("main.closeFile");
+                                }
                             }
                             else {
-                                perror("main.closeFile");
+                                perror("main.appendToFile");
                             }
-                        }
-                        else {
-                            perror("main.appendToFile");
                         }
                         
                     }
