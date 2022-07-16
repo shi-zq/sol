@@ -28,8 +28,8 @@ typedef struct fileNode {
 } fileNode;
 
 int nThread = 2; // numero di thread
-int maxFileNumber = 10; // massimo numero di file
-int maxStorageSize = 10*1024; // massimo capacita
+int maxFileNumber = 3; // massimo numero di file
+int maxStorageSize = 3*1024; // massimo capacita
 
 int currentNumber = 0; //numero di file corrente
 int currentSize = 0; //numero di capacita usato
@@ -49,11 +49,71 @@ pthread_mutex_t fileLog = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t jobList = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t jobListNotEmpty = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t fileList = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t fileListFree = PTHREAD_COND_INITIALIZER;
 
+long isNumber(const char* s){
+    char* e = NULL;
+    long val = strtol(s, &e, 0);
+    if (e != NULL && *e == (char)0) return val;
+    return -1;
+}
+
+void parser(char* path) {
+    FILE* fp = fopen(path, "r");
+    if(fp == NULL) {
+        perror("parser.fopen");
+        exit(EXIT_FAILURE);
+    }
+    char buf[100];
+    char* token;
+    char* token2;
+    char* save;
+    int tmp;
+    while (fgets(buf, 100, fp) != NULL) {
+        token = strtok_r(buf, "=", &save);
+        if(strlen(token) != 1) {
+            printf("errore nel config file");
+            exit(EXIT_FAILURE);
+        }
+        switch(token[0]) {
+            case('n'):
+                token2 = strtok_r(NULL, "=", &save);
+                tmp = isNumber(token2);
+                if(tmp < 0) {
+                    printf("errore nel n");
+                    exit(EXIT_FAILURE);
+                }
+                nThread = tmp;
+                break;
+            case('k'):
+                token2 = strtok_r(NULL, "=", &save);
+                tmp = isNumber(token2);
+                if(tmp < 0) {
+                    printf("errore nel k");
+                    exit(EXIT_FAILURE);
+                }
+                maxFileNumber = tmp;
+                break;
+            case('s'):
+                token2 = strtok_r(NULL, "=", &save);
+                tmp = isNumber(token2);
+                if(tmp < 0) {
+                    printf("errore nel s");
+                    exit(EXIT_FAILURE);
+                }
+                maxStorageSize = tmp;
+                break;
+            default:
+                printf("errore nel file di config");
+                exit(EXIT_FAILURE);               
+        }
+    }
+        
+}
 void setMaxFileNumberHit(int newCurrFileNumber) {
     currentNumber = newCurrFileNumber;
     if(newCurrFileNumber > maxFileNumberHit) {
-        maxFileNumber = newCurrFileNumber;
+        maxFileNumberHit = newCurrFileNumber;
     }
 }
 
@@ -249,26 +309,28 @@ void writeFileNode(int clientSocketNumber, char* path, char* data) {
         if(strcmp(path, tmp->abspath) == 0) {
             found = 1;
             if(tmp->clientSocketNumber == -1 || tmp->clientSocketNumber == clientSocketNumber) {
-                if(currentNumber + 1 > maxFileNumber && currentSize + strlen(data) > maxStorageSize) { //controllo se posso mettere queto file
+                printf("%d \n", currentNumber);
+                if(currentNumber + 1 > maxFileNumber || currentSize + strlen(data) > maxStorageSize) { //controllo se posso mettere questo file
                     fileNode* tmp1 = headFile;
                     while(success == 0 && tmp1 != NULL) { //controllo quali sono file liberi
                         if(tmp1->clientSocketNumber == -1 && strcmp(tmp1->abspath, path) != 0 && tmp1->data != NULL) {
                             freeSpace = freeSpace + strlen(tmp1->data);
                             freeFile++;
-                            answer++;
+                            printf("free %d %d \n", freeSpace, freeFile);
+                            answer++; //answer = 0 inizialmente
                         }
-                        if(currentNumber - freeFile + 1 <= maxFileNumber && currentSize - freeSpace + strlen(tmp->data) <= maxStorageSize) {
+                        if(currentNumber - freeFile + 1 <= maxFileNumber && currentSize - freeSpace + strlen(data) <= maxStorageSize) {
                             success = 1;
                         }
                         else {
                             tmp1 = tmp1->next;
                         }
                     }
-                    if(success == 0) {
+                    if(success == 0) { //non ha data
                         //liberare questo nodo
                         if(prev == NULL) { // \`e il primo elemento
                             headFile = tmp->next;
-                            free(tmp->abspath);
+                            free(tmp->abspath); //non ha data
                             free(tmp);
                         }
                         else {
@@ -292,9 +354,11 @@ void writeFileNode(int clientSocketNumber, char* path, char* data) {
     char response[REQUEST];
     memset(response, 0, REQUEST);
     char outFile[REQUEST + DATA];
+    memset(outFile, 0, REQUEST + DATA);
     if(found == 0) {
-        answer = -5;
+        answer = -5; // file non trovato
     }
+    printf("%d \n", answer);
     if(answer < 0) {
         sprintf(response, "%d", answer);
         if(write(clientSocketNumber, response, REQUEST) == -1) {
@@ -302,7 +366,7 @@ void writeFileNode(int clientSocketNumber, char* path, char* data) {
             exit(EXIT_FAILURE);
         }
         pthread_mutex_lock(&fileLog);
-        fprintf(flog, "%d;writeFileNode;0;%s;%d \n", gettid(), tmp->abspath, answer); //writeFIleNode fallito percio o per len
+        fprintf(flog, "%d;writeFileNode;0;%s;%d \n", gettid(), tmp->abspath, answer); //writeFIleNode fallito percio 0 per len
         fflush(flog);
         pthread_mutex_unlock(&fileLog);      
     }
@@ -314,10 +378,10 @@ void writeFileNode(int clientSocketNumber, char* path, char* data) {
             exit(EXIT_FAILURE);
         }
         sprintf(tmp->data, "%s", data); //copio la data
-        currentNumber++;
-        currentSize = currentSize + strlen(data);  
+        setMaxFileNumberHit(currentNumber + 1);
+        setMaxStorageSizeHit(currentSize + strlen(data));  
         pthread_mutex_lock(&fileLog);
-        fprintf(flog, "%d;writeFileNode;%ld;%s;0 \n", gettid(), strlen(tmp->data), tmp->abspath);
+        fprintf(flog, "%d;writeFileNode;%ld;%s;%d \n", gettid(), strlen(tmp->data), tmp->abspath, answer);
         fflush(flog);
         pthread_mutex_unlock(&fileLog);      
         if(write(clientSocketNumber, response, REQUEST) == -1) {
@@ -328,7 +392,7 @@ void writeFileNode(int clientSocketNumber, char* path, char* data) {
         fileNode* prev2 = NULL;
         while(answer != 0) {
             outFile[0] = '\0';
-            if(tmp2->clientSocketNumber == -1) { //il file da togliere
+            if(tmp2->clientSocketNumber == -1 && strcmp(tmp2->abspath, path) != 0 && tmp2->data != NULL) { //il file da togliere
                 sprintf(outFile, "%s;%s", tmp2->abspath, tmp2->data);
                 if(write(clientSocketNumber, outFile, REQUEST + DATA) == -1) {
                     perror("writeFileNode.write");
@@ -338,7 +402,7 @@ void writeFileNode(int clientSocketNumber, char* path, char* data) {
                 currentNumber--;
                 currentSize = currentSize - strlen(tmp2->data);
                 pthread_mutex_lock(&fileLog);
-                fprintf(flog, "-1;out;%ld;%s;0 \n", strlen(tmp2->data), tmp2->abspath);
+                fprintf(flog, "-1;out;%ld;%s;0 \n", strlen(tmp2->data), tmp2->abspath); //socket = -1 operazione interna
                 fflush(flog);
                 pthread_mutex_unlock(&fileLog);
                 if(prev2 == NULL) { // la testa
@@ -391,12 +455,352 @@ void closeFileNode(int clientSocketNumber, char* path) {
         perror("writeFileNode.write");
         exit(EXIT_FAILURE);
     }
+    pthread_mutex_lock(&fileLog);
+    fprintf(flog, "%d;closeFileNode;0;%s;%d \n", gettid(), path, answer); //byte letti = 0 dato che non ci sono invio di dati
+    fflush(flog);
+    pthread_mutex_unlock(&fileLog);
+	pthread_mutex_unlock(&fileList);
+}
+
+void appendToFile(int clientSocketNumber, char* path, char* data) {
+    pthread_mutex_lock(&fileList);
+    int found = 0;
+    int answer = 0;
+    int success = 0;
+    int freeSpace = 0;
+    fileNode* tmp = headFile;
+    fileNode* prev = NULL;
+    while(tmp != NULL && found == 0) {
+        if(strcmp(tmp->abspath, path) == 0) {
+            found = 1;
+            if(tmp->clientSocketNumber == -1 || tmp->clientSocketNumber == clientSocketNumber) {
+                if(strlen(data) + strlen(tmp->data) < 1024) {
+                    if(currentSize + strlen(data) + 1 > maxStorageSize) {
+                        fileNode* tmp1 = headFile;
+                        while(success == 0 && tmp1 != NULL) { //controllo quali sono file liberi
+                            if(tmp1->clientSocketNumber == -1 && strcmp(tmp1->abspath, path) != 0 && tmp1->data != NULL) {
+                                freeSpace = freeSpace + strlen(tmp1->data);
+                                answer++;
+                            }
+                            if(currentSize - freeSpace + strlen(tmp->data) <= maxStorageSize) {
+                                success = 1;
+                            }
+                            else {
+                                tmp1 = tmp1->next;
+                            }
+                        }
+                        if(success == 0) {
+                            answer = -4; // non hai spazio
+                        }          
+                    }
+                }
+                else {
+                    answer = -6; // file troppo grande
+                }
+            }
+        }
+        else {
+            prev = tmp;
+            tmp = tmp->next;
+        }
+    }
+    if(found == 0) {
+        answer = -5;
+    }
+    char response[REQUEST];
+    memset(response, 0, REQUEST);
+    char outFile[REQUEST + DATA];
+    if(answer < 0) {
+        sprintf(response, "%d", answer);
+        if(write(clientSocketNumber, response, REQUEST) == -1) {
+            perror("appentoToFile.write");
+            exit(EXIT_FAILURE);
+        }
+        pthread_mutex_lock(&fileLog);
+        fprintf(flog, "%d;appentoToFile;0;%s;%d \n", gettid(), tmp->abspath, answer); //appentoToFile fallito percio o per len
+        fflush(flog);
+        pthread_mutex_unlock(&fileLog);      
+    }
+    else { //answer >= 0
+        sprintf(response, "%d", answer);
+        tmp->data = realloc(tmp->data, (strlen(data) + strlen(tmp->data) + 1) * sizeof(char));
+        if(tmp->data == NULL) {
+            perror("appentoToFile.malloc");
+            exit(EXIT_FAILURE);
+        }
+        strcat(tmp->data, data); //concateno
+        setMaxStorageSizeHit(currentSize + strlen(data));  
+        pthread_mutex_lock(&fileLog);
+        fprintf(flog, "%d;appentoToFile;%ld;%s;%d \n", gettid(), strlen(tmp->data), tmp->abspath, answer);
+        fflush(flog);
+        pthread_mutex_unlock(&fileLog);      
+        if(write(clientSocketNumber, response, REQUEST) == -1) {
+            perror("appentoToFile.write");
+            exit(EXIT_FAILURE);
+        }
+        fileNode* tmp2 = headFile;
+        fileNode* prev2 = NULL;
+        while(answer != 0) {
+            outFile[0] = '\0';
+            if(tmp2->clientSocketNumber == -1 && strcmp(tmp2->abspath, path) != 0 && tmp2->data != NULL) { //il file da togliere
+                sprintf(outFile, "%s;%s", tmp2->abspath, tmp2->data);
+                if(write(clientSocketNumber, outFile, REQUEST + DATA) == -1) {
+                    perror("appentoToFile.write");
+                    exit(EXIT_FAILURE);
+                }
+                answer--;
+                currentNumber--;
+                currentSize = currentSize - strlen(tmp2->data);
+                pthread_mutex_lock(&fileLog);
+                fprintf(flog, "%d;out;%ld;%s;0 \n", gettid(), strlen(tmp2->data), tmp2->abspath);
+                fflush(flog);
+                pthread_mutex_unlock(&fileLog);
+                if(prev2 == NULL) { // la testa
+                    headFile = tmp2->next;
+                    free(tmp2->abspath);
+                    free(tmp2->data);
+                    free(tmp2);
+                    tmp2 = headFile;
+                }  
+                else {
+                    prev2->next = tmp2->next;
+                    free(tmp2->abspath);
+                    free(tmp2->data);
+                    free(tmp2);
+                    tmp2 = prev2->next;
+                }       
+            }
+            else {
+                prev2 = tmp2;
+                tmp2 = tmp2->next;
+            }
+        }
+    }
+    pthread_mutex_unlock(&fileList);
+}
+
+void readFileNode(int clientSocketNumber, char* path) {
+    pthread_mutex_lock(&fileList);
+    int found = 0;
+    int answer = 0;
+    fileNode* tmp = headFile;
+    while(tmp != NULL && found == 0) {
+        printf("%s", path);
+        if(strcmp(tmp->abspath, path) == 0) {
+            found = 1;
+            if(tmp->clientSocketNumber == -1 || tmp->clientSocketNumber == clientSocketNumber) {
+                if(tmp->data == NULL) {
+                    answer = -5;
+                }
+            }
+            else {
+                answer = -3; // non hai permesso
+            }
+        }
+        else {
+            tmp = tmp->next;
+        }
+    }
+    if(found == 0) {
+        answer = -5;
+    }
+    char response[REQUEST];
+    memset(response, 0, REQUEST);
+    sprintf(response, "%d", answer);
+    if(write(clientSocketNumber, response, REQUEST) == -1) {
+        perror("readFileNode.write");
+        exit(EXIT_FAILURE);
+    }
+    if(answer < 0) {
+        pthread_mutex_lock(&fileLog);
+        fprintf(flog, "%d;readFileNode;0;%s;%d \n", gettid(), path, answer);
+        fflush(flog);
+        pthread_mutex_unlock(&fileLog);
+    }
+    else {
+        memset(response, 0, DATA);
+        sprintf(response, "%s", tmp->data);
+        if(write(clientSocketNumber, response, REQUEST) == -1) {
+            perror("readFileNode.write");
+            exit(EXIT_FAILURE);
+        }
+        pthread_mutex_lock(&fileLog);
+        fprintf(flog, "%d;readFileNode;%ld;%s;%d \n", gettid(), strlen(tmp->data), path, answer);
+        fflush(flog);
+        pthread_mutex_unlock(&fileLog);
+    }
+    pthread_mutex_unlock(&fileList);
+}
+
+void readNFileNode(int clientSocketNumber, int n) {
+    pthread_mutex_lock(&fileList);
+    fileNode* tmp = headFile;
+    int answer = 0;
+    int sendFile = 0;
+    while(tmp != NULL && n != 0) {
+        if(tmp->clientSocketNumber == clientSocketNumber || tmp->clientSocketNumber == -1) {
+            answer++;//se n positivo answer = n, se n negativo answer contiene tutti i file disponibile
+            n--;
+        }
+        tmp = tmp->next;
+    }
+    char response[REQUEST];
+    memset(response, 0, REQUEST);
+    sprintf(response, "%d", answer);
+    if(write(clientSocketNumber, response, REQUEST) == -1) {
+        perror("readNFileNode.write");
+        exit(EXIT_FAILURE);
+    }
+    tmp = headFile;
+    char data[REQUEST + DATA];
+    while(answer > 0) {
+        memset(data, 0, REQUEST + DATA);
+        if(tmp->clientSocketNumber == -1 || tmp->clientSocketNumber == clientSocketNumber) {
+            sprintf(data, "%s;%s", tmp->abspath, tmp->data);
+            if(write(clientSocketNumber, data, REQUEST) == -1) {
+                perror("readNFileNode.write");
+                exit(EXIT_FAILURE);
+            }
+            sendFile = sendFile + strlen(data);
+            answer--;
+        }
+        tmp = tmp->next;
+    }
+    pthread_mutex_lock(&jobList);
+    fprintf(flog, "%d;readNFileNode;%d;NULL;%d \n", gettid(), sendFile, answer);
+    fflush(flog);
+    pthread_mutex_unlock(&jobList);
+    pthread_mutex_unlock(&fileList);
+}
+void lockFileNode(int clientSocketNumber, char* path) {
+    pthread_mutex_lock(&fileList);
+    fileNode* tmp;
+    int found = 0;
+    int success = 0;
+    int answer = 0;
+    while(success == 0) {
+        tmp = headFile;
+        found = 0;
+        while(tmp != NULL && found == 0) {
+            if(strcmp(tmp->abspath, path) == 0) {
+                found = 1;
+                if(tmp->clientSocketNumber == -1 || tmp->clientSocketNumber == clientSocketNumber) {
+                    success = 1;
+                }
+            }
+            else {
+                tmp = tmp->next;
+            }
+        }
+        //found = 0 success = 0
+        //found = 1 success = 0
+        //found = 1 success = 1
+        if(found == 0) { //caso 0 0
+            answer = -5;
+            success = 1;
+        }
+        if(success == 0) { // caso 1 0
+            pthread_cond_wait(&fileListFree, &fileList);
+        }
+    }
+    char response[REQUEST];
+    memset(response, 0, REQUEST);
+    sprintf(response, "%d", answer);
+    if(write(clientSocketNumber, response, REQUEST) == -1) {
+        perror("lockFileNode.write");
+        exit(EXIT_FAILURE);
+    }
     pthread_mutex_unlock(&fileList);
     pthread_mutex_lock(&fileLog);
-    fprintf(flog, "%d;closeFileNode;0;%s;%d \n", gettid(), path, answer);
+    fprintf(flog, "%d;lockFileNode;0;%s;%d \n", gettid(), path, answer);
     fflush(flog);
-    pthread_mutex_unlock(&fileLog); 
-    
+    pthread_mutex_unlock(&fileLog);
+}
+
+void unlockFileNode(int clientSocketNumber, char* path) {
+    pthread_mutex_lock(&fileList);
+    fileNode* tmp = headFile;
+    int found = 0;
+    int answer = 0;
+    while(tmp != NULL && found == 0) {
+        if(strcmp(tmp->abspath, path) == 0) {
+            found = 1;
+            if(tmp->clientSocketNumber == clientSocketNumber) {
+                tmp->clientSocketNumber = -1;
+            }
+            else {
+                answer = -3; // non hai permesso
+            }
+        }
+        else {
+            tmp = tmp->next;
+        }
+    }
+    if(found == 0) {
+        answer = -5; //file non trvato
+    }
+    char response[REQUEST];
+    memset(response, 0, REQUEST);
+    sprintf(response, "%d", answer);
+    if(write(clientSocketNumber, response, REQUEST) == -1) {
+        perror("unlockFileNode.write");
+        exit(EXIT_FAILURE);
+    }
+    pthread_cond_signal(&fileListFree);
+    pthread_mutex_unlock(&fileList);
+    pthread_mutex_lock(&fileLog);
+    fprintf(flog, "%d;unlockFileNode;0;%s;%d \n", gettid(), path, answer);
+    fflush(flog);
+    pthread_mutex_unlock(&fileLog);
+}
+
+void removeFileNode(int clientSocketNumber, char* path) {
+    pthread_mutex_lock(&fileList);
+    fileNode* tmp = headFile;
+    fileNode* prev = NULL;
+    int found = 0;
+    int answer = 0;
+    while(tmp != NULL && found == 0) {
+        if(strcmp(tmp->abspath, path) == 0) {
+            found = 1;
+            if(tmp->clientSocketNumber == clientSocketNumber) {
+                if(prev == NULL) {
+                    headFile = tmp->next;
+                }
+                else {
+                    prev->next = tmp->next;
+                }
+                currentNumber--;
+                currentSize = currentNumber - strlen(tmp->data);
+                free(tmp->data);
+                free(tmp->abspath);
+                free(tmp);
+            }
+            else {
+                answer = -3; // non hai permesso
+            }
+        }
+        else {
+            prev = tmp;
+            tmp = tmp->next;
+        }
+    }
+    if(found == 0) {
+        answer = -5; //file non trvato
+    }
+    char response[REQUEST];
+    memset(response, 0, REQUEST);
+    sprintf(response, "%d", answer);
+    if(write(clientSocketNumber, response, REQUEST) == -1) {
+        perror("removeFileNode.write");
+        exit(EXIT_FAILURE);
+    }
+    pthread_cond_signal(&fileListFree);
+    pthread_mutex_unlock(&fileList);
+    pthread_mutex_lock(&fileLog);
+    fprintf(flog, "%d;removeFileNode;0;%s;%d \n", gettid(), path, answer);
+    fflush(flog);
+    pthread_mutex_unlock(&fileLog);
 }
 void *worker() {
     //printf("sono %d \n", gettid());
@@ -443,17 +847,46 @@ void *worker() {
                     writeFileNode(clientSocketNumber, token2, token3);
                     break;
                 case('c'):
-                    closeFileNode(clientSocketNumber, strtok_r(NULL, ";", &save));
+                    token2 = strtok_r(NULL, ";", &save);
+                    closeFileNode(clientSocketNumber, token2);
+                    break;
+                case('a'):
+                    token2 = strtok_r(NULL, ";", &save);
+                    token3 = strtok_r(NULL, ";", &save);
+                    appendToFile(clientSocketNumber, token2, token3);
+                    break;
+                case('r'):
+                    token2 = strtok_r(NULL, ";", &save);
+                    readFileNode(clientSocketNumber, token2);
+                    break;
+                case('R'):
+                    token2 = strtok_r(NULL, ";", &save);
+                    readNFileNode(clientSocketNumber, atoi(token2));
+                    break;
+                case('l'):
+                    token2 = strtok_r(NULL, ";", &save);
+                    lockFileNode(clientSocketNumber, token2);
+                    break;
+                case('u'):
+                    token2 = strtok_r(NULL, ";", &save);;
+                    unlockFileNode(clientSocketNumber, token2);
+                    break;
+                case('d'):
+                    token2 = strtok_r(NULL, ";", &save);
+                    removeFileNode(clientSocketNumber, token2);
                     break;
                 default:
                     printf("default \n");
             }
         }
     }
-    return (void*)count;
+    return (void*)0;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if(argc == 2) {
+        parser(argv[1]);
+    }
     unlink("./socket"); 
     unlink("./log");
     int currConnection = 0;

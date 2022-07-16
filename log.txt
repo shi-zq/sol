@@ -1,2 +1,66 @@
 new client 
-exit client 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4205;writeFileNode;5;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+4204;readFileNode;5;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+4204;closeConnection;0;NULL;0 
+client exit 
+new client 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+4204;closeConnection;0;NULL;0 
+client exit 
+new client 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+4204;closeConnection;0;NULL;0 
+client exit 
+new client 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4205;writeFileNode;7;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4205;openFilenode;0;/home/q/sol/clientFile/pro/test/primo.txt;1 
+4204;appentoToFile;10;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4205;closeFileNode;0;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4205;writeFileNode;5;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/secondo.txt;1 
+4205;appentoToFile;14;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4205;openFilenode;0;/home/q/sol/clientFile/pro/test/primo.txt;1 
+4204;appentoToFile;15;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4205;closeFileNode;0;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/terzo.txt;1 
+4205;appentoToFile;10;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4205;closeConnection;0;NULL;0 
+client exit 
+new client 
+client exit 
+new client 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/secondo.txt;1 
+4205;appentoToFile;21;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/secondo.txt;0 
+4205;openFilenode;0;/home/q/sol/clientFile/pro/test/primo.txt;1 
+4204;appentoToFile;20;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4205;closeFileNode;0;/home/q/sol/clientFile/pro/test/primo.txt;0 
+4204;openFilenode;0;/home/q/sol/clientFile/pro/test/terzo.txt;1 
+4205;appentoToFile;15;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4204;closeFileNode;0;/home/q/sol/clientFile/pro/test/terzo.txt;0 
+4205;closeConnection;0;NULL;0 
+client exit 
