@@ -26,7 +26,7 @@ typedef struct commandNode {
 } commandNode;
 
 commandNode* headCommand = NULL; //FIFO
-int clientSocket;
+int clientSocket = -1;
 char* nameSocket = NULL;
 
 long isNumber(const char* s){
@@ -38,7 +38,7 @@ long isNumber(const char* s){
 
 int setErrno(int result) {
     switch(result) {
-        case(-1):
+        case(-1): //errno settato da chiamate di funzione
             return -1;
         case(-2):
             errno = EEXIST;
@@ -58,6 +58,9 @@ int setErrno(int result) {
         case(-7):
             errno = ENAMETOOLONG;
             return -1;
+        case(-8):
+            errno = ENOTCONN;
+            return -1;
         default:
             return result;
     }
@@ -76,8 +79,7 @@ void add(char operation, char* path) {
         perror("add.malloc");
         exit(EXIT_FAILURE);
     }
-    sprintf(new->path, "%s", path);
-    
+    snprintf(new->path, strlen(path) + 1, "%s", path);
     if(headCommand == NULL) {
         headCommand = new;
     }
@@ -96,7 +98,7 @@ int compareTime(struct timespec endTime){
     if(currTime.tv_sec < endTime.tv_sec) {
         return 1;
     }
-    if(currTime.tv_sec  == endTime.tv_sec) {
+    if(currTime.tv_sec == endTime.tv_sec) {
         if(currTime.tv_nsec < endTime.tv_nsec) {
             return 1;
         }
@@ -108,12 +110,11 @@ int compareTime(struct timespec endTime){
 }
 
 int openConnection(const char* socketName, int msec, const struct timespec endTime) {
-    int result = -1;
     struct sockaddr_un sa;
     strncpy(sa.sun_path, socketName, UNIX_PATH_MAX);
     sa.sun_family = AF_UNIX;
     if((clientSocket = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-        return setErrno(result);
+        return setErrno(-1);
     }
     int connesso = 0;
     while (compareTime(endTime) == 1 && connesso == 0){
@@ -128,11 +129,11 @@ int openConnection(const char* socketName, int msec, const struct timespec endTi
             perror("openConnecton.malloc");
             exit(EXIT_FAILURE);
         }
-        sprintf(nameSocket, "%s", socketName);
+        snprintf(nameSocket, strlen(socketName) + 1, "%s", socketName);
         return setErrno(0);
     }
     else {
-        return setErrno(result);
+        return setErrno(-1);
     }
 }
 
@@ -141,114 +142,109 @@ int closeConnection(const char* sockname) {
     char answer[REQUEST];
     memset(request, 0, REQUEST);
     memset(answer, 0, REQUEST);
-    int result = -1;
     if(strcmp(nameSocket, sockname) == 0) {
-        sprintf(request, "C");
+        snprintf(request, REQUEST, "C");
         if(write(clientSocket, request, REQUEST) == -1) {
-            return setErrno(result);
+            return setErrno(-1);
         }
         if(read(clientSocket, answer, REQUEST) == -1) {
-            return setErrno(result);
+            return setErrno(-1);
         }
+        int result = atoi(answer);
+        if(result == 0) {
+            free(nameSocket);
+            close(clientSocket);
+        }
+        return setErrno(result);
     }
-    result = atoi(answer);
-    if(result == 0) {
-        free(nameSocket);
-        close(clientSocket);
+    else {
+        return setErrno(-9);
     }
-    return setErrno(result);
 }
 
 int openFile(const char* pathname, int flags) {
+    char request[REQUEST];
+    char answer[REQUEST];
+    memset(request, 0, REQUEST);
+    memset(answer, 0, REQUEST);
     char* absPath = NULL;
-    int result = -1;
     absPath = realpath(pathname, absPath);
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
-    sprintf(request, "o;%s;%d", absPath, flags);
+    snprintf(request, REQUEST, "o;%s;%d", absPath, flags);
     free(absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
-        return setErrno(result);
+        return setErrno(-1);
     }
     if(read(clientSocket, answer, REQUEST) == -1) {
-        return setErrno(result);
+        return setErrno(-1);
     }
-    result = atoi(answer);
+    int result = atoi(answer);
     return setErrno(result);
 }
 
 int writeFile(const char* pathname, const char* dirname) {
-    int result = -1;
     FILE *fp;
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
-    if(absPath == NULL) {
-        return setErrno(-1);
-    }
-    if ((fp = fopen(pathname, "r")) == NULL) {
-        return setErrno(result);
-    }
     char data[DATA];
     memset(data, 0, DATA);
     data[0] = '\0';
     char buffer[DATA];
     memset(buffer, 0, DATA);
+    if(absPath == NULL) {
+        return setErrno(-1);
+    }
+    if ((fp = fopen(pathname, "r")) == NULL) {
+        return setErrno(-1);
+    }
     while (fgets(buffer, DATA, fp) != NULL) {
         if(strlen(buffer) + strlen(data) + 1 < DATA) {
             strcat(data, buffer);
         }
         else {
-            result = -7;
-            return setErrno(result);
+            return setErrno(-7);
         }
     }
     fclose(fp);
     char request[REQUEST + DATA];
     memset(request, 0, REQUEST + DATA);
-    sprintf(request, "w;%s;%s", absPath, data);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
+    snprintf(request, REQUEST + DATA, "w;%s;%s", absPath, data);
     free(absPath);
     if(write(clientSocket, request, REQUEST + DATA) == -1) {
         return setErrno(-1);
     }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(read(clientSocket, answer, REQUEST) == -1) {
         return setErrno(-1);
     }
-    result = atoi(answer);
+    int result = atoi(answer);
     char outFile[REQUEST + DATA];
-    memset(outFile, 0, REQUEST + DATA);
-    char fileName[DATA];
+    char fileName[REQUEST];
     if(result >= 0) {
-        int save;
+        int saved;
         if(dirname == NULL) {
-            save = 0;
+            saved = 0;
         }
         else {
-            save = 1;
+            saved = 1;
         }
         while(result > 0) {
             memset(outFile, 0, REQUEST + DATA);
             memset(fileName, 0, DATA);
             if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
-                perror("writeFile.read");
-                exit(EXIT_FAILURE);
                 return setErrno(-1);
             }
-            if(save == 1) {
+            if(saved == 1) {
                 char* save = NULL;
                 char* token = NULL;
                 token = strtok_r(outFile, ";", &save);
-                sprintf(fileName, "%s/%s", dirname, basename(token));
+                snprintf(fileName, DATA, "%s/%s", dirname, basename(token));
                 FILE* file = fopen(fileName, "w");
                 if(file == NULL) {
-                    perror("writeFile.fopen");
-                    exit(EXIT_FAILURE);
+                    return setErrno(-1);
                 }
                 token = strtok_r(NULL, ";", &save);
                 fprintf(file, "%s", token);
@@ -265,75 +261,69 @@ int writeFile(const char* pathname, const char* dirname) {
 
 int closeFile(const char* pathname) {
     char* absPath = NULL;
-    int result = -1;
     absPath = realpath(pathname, absPath);
-    if(absPath == NULL) {
-        return setErrno(-1);
-    }
     char request[REQUEST];
     memset(request, 0, REQUEST);
     char answer[REQUEST];
     memset(answer, 0, REQUEST);
-    sprintf(request, "c;%s", absPath);
+    if(absPath == NULL) {
+        return setErrno(-1);
+    }
+    snprintf(request, REQUEST, "c;%s", absPath);
     free(absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
-        return setErrno(result);
+        return setErrno(-1);
     }
     if(read(clientSocket, answer, REQUEST) == -1) {
-        return setErrno(result);
+        return setErrno(-1);
     }
-    result = atoi(answer);
+    int result = atoi(answer);
     return setErrno(result);
 }
 
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname) {
     char* absPath = NULL;
-    int result = -1;
     absPath = realpath(pathname, absPath);
     if(absPath == NULL) {
         return setErrno(-1);
     }
     char request[REQUEST + DATA];
     memset(request, 0, REQUEST + DATA);
-    sprintf(request, "a;%s;%s", absPath, (char*)buf);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
+    snprintf(request, REQUEST, "a;%s;%s", absPath, (char*)buf);
     free(absPath);
     if(write(clientSocket, request, REQUEST + DATA) == -1) {
         return setErrno(-1);
     }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(read(clientSocket, answer, REQUEST) == -1) {
         return setErrno(-1);
     }
-    result = atoi(answer);
+    int result = atoi(answer);
     char outFile[REQUEST + DATA];
-    memset(outFile, 0, REQUEST + DATA);
     char fileName[DATA];
     if(result >= 0) {
-        int save;
+        int saved;
         if(dirname == NULL) {
-            save = 0;
+            saved = 0;
         }
         else {
-            save = 1;
+            saved = 1;
         }
         while(result > 0) {
             memset(outFile, 0, REQUEST + DATA);
             memset(fileName, 0, DATA);
             if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
-                perror("writeFile.read");
-                exit(EXIT_FAILURE);
                 return setErrno(-1);
             }
-            if(save == 1) {
+            if(saved == 1) {
                 char* save = NULL;
                 char* token = NULL;
                 token = strtok_r(outFile, ";", &save);
-                sprintf(fileName, "%s/%s", dirname, basename(token));
+                snprintf(fileName, DATA, "%s/%s", dirname, basename(token));
                 FILE* file = fopen(fileName, "w");
                 if(file == NULL) {
-                    perror("writeFile.fopen");
-                    exit(EXIT_FAILURE);
+                    return setErrno(-1);
                 }
                 token = strtok_r(NULL, ";", &save);
                 fprintf(file, "%s", token);
@@ -349,29 +339,28 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 }
 
 int readFile(const char* pathname, void** buf, size_t* size) {
-    int result = -1;
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
     char request[REQUEST];
     memset(request, 0, REQUEST);
-    sprintf(request, "r;%s", absPath);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
+    snprintf(request, REQUEST, "r;%s", absPath);
     free(absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(read(clientSocket, answer, REQUEST) == -1) {
         return setErrno(-1);
     }
-    result = atoi(answer);
+    int result = atoi(answer);
     if(result == 0) {
-        memset(answer, 0, DATA);
+        memset(answer, 0, DATA); //riutillizare answer per ricevere dati
         if(read(clientSocket, answer, REQUEST) == -1) {
             return setErrno(-1);
         }
         char* data = malloc((strlen(answer) + 1) * sizeof(char));
-        sprintf(data, "%s", answer);
+        snprintf(data, strlen(data) + 1, "%s", answer);
         *size = strlen(data);
         *buf = (void*)data;
     }
@@ -379,46 +368,42 @@ int readFile(const char* pathname, void** buf, size_t* size) {
 }
 
 int readNFiles(int n, const char* dirname) {
-    int result = -1;
     char request[REQUEST];
     memset(request, 0, REQUEST);
-    sprintf(request, "%d", n);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
+    snprintf(request, REQUEST, "%d", n);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(read(clientSocket, answer, REQUEST) == -1) {
         return setErrno(-1);
     }
-    result = atoi(answer);
+    int result = atoi(answer);
     char outFile[REQUEST + DATA];
     char fileName[DATA];
     if(result >= 0) {
-        int save;
+        int saved;
         if(dirname == NULL) {
-            save = 0;
+            saved = 0;
         }
         else {
-            save = 1;
+            saved = 1;
         }
         while(result > 0) {
             memset(outFile, 0, REQUEST + DATA);
             memset(fileName, 0, DATA);
             if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
-                perror("writeFile.read");
-                exit(EXIT_FAILURE);
                 return setErrno(-1);
             }
-            if(save == 1) {
+            if(saved == 1) {
                 char* save = NULL;
                 char* token = NULL;
                 token = strtok_r(outFile, ";", &save);
-                sprintf(fileName, "%s/%s", dirname, basename(token));
+                snprintf(fileName, DATA, "%s/%s", dirname, basename(token));
                 FILE* file = fopen(fileName, "w");
                 if(file == NULL) {
-                    perror("writeFile.fopen");
-                    exit(EXIT_FAILURE);
+                    return -1;
                 }
                 token = strtok_r(NULL, ";", &save);
                 fprintf(file, "%s", token);
@@ -437,57 +422,37 @@ int readNFiles(int n, const char* dirname) {
 int lockFile(const char* pathname) {
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
+    char request[REQUEST];
+    memset(request, 0, REQUEST);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    sprintf(request, "l;%s", absPath);
+    snprintf(request, REQUEST, "l;%s", absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
-    if(read(clientSocket, answer, REQUEST) == -1) {
-        return setErrno(-1);
-    }
-    int result = atoi(answer);
-    return setErrno(answer);
-}
-int unlockFile(const char* pathname) {
-    char* absPath = NULL;
-    absPath = realpath(pathname, absPath);
-    if(absPath == NULL) {
-        return setErrno(-1);
-    }
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    sprintf(request, "u;%s", absPath);
-    if(write(clientSocket, request, REQUEST) == -1) {
-        return setErrno(-1);
-    }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(read(clientSocket, answer, REQUEST) == -1) {
         return setErrno(-1);
     }
     int result = atoi(answer);
     return setErrno(result);
 }
-int removeFile(const char* pathname) {
+int unlockFile(const char* pathname) {
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
+    char request[REQUEST];
+    memset(request, 0, REQUEST);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    sprintf(request, "C;%s", absPath);
+    snprintf(request, strlen(absPath) + 3, "u;%s", absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(read(clientSocket, answer, REQUEST) == -1) {
         return setErrno(-1);
     }
@@ -495,15 +460,40 @@ int removeFile(const char* pathname) {
     return setErrno(result);
 }
 
-void writeNFiles(char* dirName, int* n) {
-    DIR* dir;
-    struct dirent* entry;
-    if((dir = opendir(dirName)) == NULL || *n == 0){
-        return;
+int removeFile(const char* pathname) {
+    char* absPath = NULL;
+    char request[REQUEST];
+    memset(request, 0, REQUEST);
+    char answer[REQUEST];
+    memset(answer, 0, REQUEST);
+    absPath = realpath(pathname, absPath);
+    if(absPath == NULL) {
+        return setErrno(-1);
     }
-    while((entry = readdir(dir)) != NULL && *n != 0){
+    snprintf(request, REQUEST, "C;%s", absPath);
+    if(write(clientSocket, request, REQUEST) == -1) {
+        return setErrno(-1);
+    }
+    if(read(clientSocket, answer, REQUEST) == -1) {
+        return setErrno(-1);
+    }
+    int result = atoi(answer);
+    return setErrno(result);
+}
+
+void writeNFiles(char* dirName, int* n) { // se n \`e negatovo scrive tutti i file
+    DIR* dir = opendir(dirName);
+    if(dir == NULL) {
+        perror("writeNFiles.opendir");
+        exit(EXIT_FAILURE);
+    }
+    struct dirent* entry;
+    if(*n == 0) {
+        return; //non ho piu file da scrivere
+    }
+    while((entry = readdir(dir)) != NULL && *n != 0) {
         char path[PATH_MAX];
-        sprintf(path, "%s/%s", dirName, entry->d_name);
+        snprintf(path, PATH_MAX, "%s/%s", dirName, entry->d_name);
         struct stat info;
         if(stat(path,&info) ==- 1) {
             perror("writeNFiles.stat");
@@ -511,10 +501,10 @@ void writeNFiles(char* dirName, int* n) {
         }
         if(S_ISDIR(info.st_mode)) {
             if (strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0) {
-
+                //non faccio niente
             }
             else {
-                writeNFiles(path , n);
+                writeNFiles(path , n); //chiamo la funzione su questo
             }
         }
         else {
@@ -522,7 +512,7 @@ void writeNFiles(char* dirName, int* n) {
             (*n)--;
         }
     }
-    if ((closedir(dir))==-1){
+    if ((closedir(dir)) == -1) {
         perror("writeNFile.closedir");
         exit(EXIT_FAILURE);
     }
@@ -638,6 +628,9 @@ int main(int argc, char *argv[]) {
     printf("inizio inviare commandi \n");
     if(connected == 1) {
         while(headCommand != NULL) {
+            if(t != 0) {
+                sleep(t/1000);
+            }
             int result;
             switch(headCommand->operation) {
                 case('w'):
@@ -701,7 +694,6 @@ int main(int argc, char *argv[]) {
                                 perror("main.appendToFile");
                             }
                         }
-                        
                     }
                     break;
                 case('r'):
@@ -711,12 +703,30 @@ int main(int argc, char *argv[]) {
                     if(p == 1) {
                         printf("readFile(%s, %s, %ld) : %d \n", headCommand->path, buf, size, result);
                     }
+                    if(dird != NULL) {
+                        char* rsave = NULL;
+                        char* rtoken = NULL;
+                        char outFile[REQUEST + DATA];
+                        char fileName[DATA];
+                        memset(outFile, 0, REQUEST + DATA);
+                        memset(fileName, 0, DATA);
+                        rtoken = strtok_r(outFile, ";", &rsave);
+                        snprintf(fileName, DATA, "%s/%s", dird, basename(token));
+                        FILE* file = fopen(fileName, "w");
+                        if(file == NULL) {
+                            perror("main.fopen");
+                            exit(EXIT_FAILURE);
+                        }
+                        rtoken = strtok_r(NULL, ";", &rsave);
+                        fprintf(file, "%s", rtoken);
+                        fclose(file);
+                    }
                     free(buf);
                     break;
                 case('R'):
                     n = isNumber(headCommand->path);
                     if(n <= -1) {
-                        printf(" main.errore nel n -w \n");
+                        printf(" main.errore nel n -R \n");
                         exit(EXIT_FAILURE);
                     }
                     if(n == 0) {
@@ -751,7 +761,6 @@ int main(int argc, char *argv[]) {
                         printf("removeFile(%s) : %d \n", headCommand->path, result);
                     }
                     break; 
-
             }
             commandNode* tmp = headCommand;
             headCommand = headCommand->next;
