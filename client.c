@@ -41,25 +41,22 @@ int setErrno(int result) {
         case(-1): //errno settato da chiamate di funzione
             return -1;
         case(-2):
-            errno = EEXIST;
+            errno = EEXIST; //file esistente
             return -1;
         case(-3):
-            errno = EACCES;
+            errno = EACCES; //non hao permesso
             return -1;
         case(-4):
-            errno = ENOSPC;
+            errno = ENOSPC; //spazio non suffciente
             return -1;
         case(-5):
-            errno = ENOENT;
+            errno = ENOENT; //file non esistente
             return -1;
         case(-6):
-            errno = EFBIG;
+            errno = EFBIG; //file troppo grande
             return -1;
         case(-7):
-            errno = ENAMETOOLONG;
-            return -1;
-        case(-8):
-            errno = ENOTCONN;
+            errno = ENOTCONN; //errore di connessione
             return -1;
         default:
             return result;
@@ -142,24 +139,19 @@ int closeConnection(const char* sockname) {
     char answer[REQUEST];
     memset(request, 0, REQUEST);
     memset(answer, 0, REQUEST);
-    if(strcmp(nameSocket, sockname) == 0) {
-        snprintf(request, REQUEST, "C");
-        if(write(clientSocket, request, REQUEST) == -1) {
-            return setErrno(-1);
-        }
-        if(read(clientSocket, answer, REQUEST) == -1) {
-            return setErrno(-1);
-        }
-        int result = atoi(answer);
-        if(result == 0) {
-            free(nameSocket);
-            close(clientSocket);
-        }
-        return setErrno(result);
+    snprintf(request, REQUEST, "C");
+    if(write(clientSocket, request, REQUEST) == -1) {
+        return setErrno(-1);
     }
-    else {
-        return setErrno(-9);
+    if(read(clientSocket, answer, REQUEST) == -1) {
+        return setErrno(-1);
     }
+    int result = atoi(answer);
+    if(result == 0) {
+        free(nameSocket);
+        result = close(clientSocket);
+    }
+    return setErrno(result);
 }
 
 int openFile(const char* pathname, int flags) {
@@ -189,28 +181,28 @@ int writeFile(const char* pathname, const char* dirname) {
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
     char data[DATA];
-    memset(data, 0, DATA);
-    data[0] = '\0';
     char buffer[DATA];
+    memset(data, 0, DATA);
     memset(buffer, 0, DATA);
+    data[0] = '\0';
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    if ((fp = fopen(pathname, "r")) == NULL) {
+    if((fp = fopen(pathname, "r")) == NULL) {
         return setErrno(-1);
     }
-    while (fgets(buffer, DATA, fp) != NULL) {
+    while(fgets(buffer, DATA, fp) != NULL) {
         if(strlen(buffer) + strlen(data) + 1 < DATA) {
-            strcat(data, buffer);
+            strncat(data, buffer, strlen(buffer) + 1);
         }
         else {
-            return setErrno(-7);
+            return setErrno(-6);
         }
     }
     fclose(fp);
     char request[REQUEST + DATA];
-    memset(request, 0, REQUEST + DATA);
     char answer[REQUEST];
+    memset(request, 0, REQUEST + DATA);
     memset(answer, 0, REQUEST);
     snprintf(request, REQUEST + DATA, "w;%s;%s", absPath, data);
     free(absPath);
@@ -224,20 +216,13 @@ int writeFile(const char* pathname, const char* dirname) {
     char outFile[REQUEST + DATA];
     char fileName[REQUEST];
     if(result >= 0) {
-        int saved;
-        if(dirname == NULL) {
-            saved = 0;
-        }
-        else {
-            saved = 1;
-        }
         while(result > 0) {
             memset(outFile, 0, REQUEST + DATA);
             memset(fileName, 0, DATA);
             if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
                 return setErrno(-1);
             }
-            if(saved == 1) {
+            if(dirname !=  NULL) {
                 char* save = NULL;
                 char* token = NULL;
                 token = strtok_r(outFile, ";", &save);
@@ -248,7 +233,9 @@ int writeFile(const char* pathname, const char* dirname) {
                 }
                 token = strtok_r(NULL, ";", &save);
                 fprintf(file, "%s", token);
-                fclose(file);
+                if(fclose(file) == -1) {
+                    return -1;
+                }
             }
             result--;
         }
@@ -263,8 +250,8 @@ int closeFile(const char* pathname) {
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
     char request[REQUEST];
-    memset(request, 0, REQUEST);
     char answer[REQUEST];
+    memset(request, 0, REQUEST);
     memset(answer, 0, REQUEST);
     if(absPath == NULL) {
         return setErrno(-1);

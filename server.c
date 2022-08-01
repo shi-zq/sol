@@ -43,10 +43,8 @@ FILE* flog = NULL;
 jobNode* headJob = NULL; //FIFO
 fileNode* headFile = NULL; //aggiungere in fondo
 
-
-int pfd[2];
-int end = 0;
-int sigHanlerErrno = 0; //per salvare errno dato che perror non \`e safe
+volatile sig_atomic_t end = 0;
+int selfPipe[2];
 
 pthread_mutex_t fileLog = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t jobList = PTHREAD_MUTEX_INITIALIZER;
@@ -83,31 +81,37 @@ void parser(char* path) {
                 token2 = strtok_r(NULL, "=", &save);
                 tmp = isNumber(token2);
                 if(tmp < 0) {
-                    printf("errore nel n");
-                    exit(EXIT_FAILURE);
+                    printf("n non valido, n=2 per default \n");
                 }
-                nThread = tmp;
+                else {
+                    nThread = tmp;
+                }
                 break;
             case('k'):
                 token2 = strtok_r(NULL, "=", &save);
                 tmp = isNumber(token2);
                 if(tmp < 0) {
-                    printf("errore nel k");
-                    exit(EXIT_FAILURE);
+                    printf("k non valido, k=3 per default \n");
                 }
-                maxFileNumber = tmp;
+                else {
+                    maxFileNumber = tmp;
+                }
                 break;
             case('s'):
                 token2 = strtok_r(NULL, "=", &save);
                 tmp = isNumber(token2);
                 if(tmp < 0) {
-                    printf("errore nel s");
-                    exit(EXIT_FAILURE);
+                    printf("s non valido, s=3*1024 per default");
                 }
-                maxStorageSize = tmp;
+                else {
+                    maxStorageSize = tmp;
+                }
                 break;
             default:
-                printf("errore nel file di config %s", token);
+                printf("file di configurazione non valido usare il seguente formatto \n");
+                printf("n=numero di thread \n");
+                printf("k=numero di file \n");
+                printf("s=size di storage \n");
                 exit(EXIT_FAILURE);               
         }
     }
@@ -129,25 +133,17 @@ void setMaxStorageSizeHit(int newCurrStorageSize) {
 }
 
 static void sigHandler (int sig) {
-    switch(sig) {
-        case(SIGINT):
-            if(write(pfd[1], "-1", 2) == -1) {
-                sigHanlerErrno = errno;
-            }
-            break;
-        case(SIGQUIT):
-            if(write(pfd[1], "-1", 2) == -1) {
-                sigHanlerErrno = errno;
-            }
-            break;
-        case(SIGHUP):
-            if(write(pfd[1], "-2", 2) == -1) {
-                sigHanlerErrno = errno;
-            }
-            break;
+    if(write(selfPipe[1], "q", 1) == -1) {
+        _exit(EXIT_FAILURE);
     }
-    if(close(pfd[1]) == -1) {
-        sigHanlerErrno = errno;
+    if(close(selfPipe[1]) == -1) {
+        _exit(EXIT_FAILURE);
+    }
+    if(sig == SIGQUIT || sig == SIGINT) {
+        end = -1;
+    }
+    else {
+        end = -2;
     }
 }
 
@@ -566,7 +562,7 @@ void appendToFile(int clientSocketNumber, char* path, char* data) {
                 currentNumber--;
                 currentSize = currentSize - strlen(tmp2->data);
                 pthread_mutex_lock(&fileLog);
-                fprintf(flog, "thread=-1;op=out;read=%ld;write=0;path=%s;answer=2 \n", gettid(), strlen(tmp2->data), tmp2->abspath);
+                fprintf(flog, "thread=-1;op=out;read=%ld;write=0;path=%s;answer=2 \n", strlen(tmp2->data), tmp2->abspath);
                 fflush(flog);
                 pthread_mutex_unlock(&fileLog);
                 if(prev2 == NULL) { // la testa
@@ -927,10 +923,6 @@ int main(int argc, char *argv[]) {
     if(serverSocket > num_client){
         num_client = serverSocket;
     }
-    if(pipe(pfd) == -1) {
-        perror("main.pipe");
-        exit(EXIT_FAILURE);
-    } 
     sigset_t sigset;
     if(sigfillset(&sigset) == -1) {
         perror("main.sigfillset");
@@ -955,8 +947,13 @@ int main(int argc, char *argv[]) {
         perror("main.sigaction");
         exit(EXIT_FAILURE);
     }
-    if(sigaction(SIGPIPE, SIG_IGN, NULL) == -1) {
+    s.sa_handler = SIG_IGN;
+    if(sigaction(SIGPIPE, &s, NULL) == -1) {
         perror("main.sigaction");
+        exit(EXIT_FAILURE);
+    }
+    if(pipe(selfPipe) == -1) {
+        perror("main.pipe");
         exit(EXIT_FAILURE);
     }
     if(sigemptyset(&sigset) == -1) {
@@ -969,12 +966,9 @@ int main(int argc, char *argv[]) {
     }
     FD_ZERO(&set);
     FD_SET(serverSocket, &set);
-    FD_SET(pfd[0], &set);
-    if(pfd[0] > num_client) {
-        num_client = pfd[0];
-    }
+    FD_SET(selfPipe[0], &set);
     pthread_t workerID;
-    int *workerIDArray = malloc(nThread*sizeof(int));
+    pthread_t *workerIDArray = malloc(nThread*sizeof(pthread_t));
     if(workerIDArray == NULL) {
         perror("main.malloc");
         exit(EXIT_FAILURE);
@@ -988,11 +982,30 @@ int main(int argc, char *argv[]) {
     }
     int run = 1;
     printf("server pronto \n" );
+    char h;
     while(run == 1) {
         rdset = set;
-        if(select(num_client + 1, &rdset, NULL, NULL, NULL) == -1) {
-            perror("main.select");
-            exit(EXIT_FAILURE);
+        if(select(num_client + 1, &rdset, NULL, NULL, NULL) == -1) { //controllo se segnale `e arrivato durante attesa di select
+            if(end == -1) {
+                emptyJobList();
+                addExitNodeJobList();
+                read(selfPipe[0], &h, 1);
+                run = 0;
+            }
+            else {
+                if(end == -2) {
+                    FD_CLR(serverSocket, &set); //non accetta piu connessioni, viene ripetuto piu volte
+                    if(currConnection == 0) {
+                        addExitNodeJobList();
+                        read(selfPipe[0], &h, 1);
+                        run = 0;
+                    }
+                }
+                else {
+                    perror("main.slect");
+                    exit(EXIT_FAILURE);
+                }
+            }
         }
         else {
             for(int j = 0; j <= num_client; j++) {
@@ -1014,17 +1027,14 @@ int main(int argc, char *argv[]) {
                         pthread_mutex_unlock(&fileLog);
                     }
                     else {
-                        if(j == pdf[0]) {
-                            if(read(pfd[0], end, sizeof(int)) == -1) {
-                                perror("main.read");
-                                exit(EXIT_FAILURE);
+                        if(j == selfPipe[0]) {
+                            read(selfPipe[0], &h, 1);
+                            if(end == -1) {
+                                emptyJobList();
+                                addExitNodeJobList();
+                                run = 0;
                             }
                             else {
-                                if(end == -1) {
-                                    emptyJobList();
-                                    addExitNodeJobList();
-                                    run = 0;
-                                }
                                 if(end == -2) {
                                     FD_CLR(serverSocket, &set); //non accetta piu connessioni, viene ripetuto piu volte
                                     if(currConnection == 0) {
@@ -1032,10 +1042,11 @@ int main(int argc, char *argv[]) {
                                         run = 0;
                                     }
                                 }
-                            }
-                            printf("end = %d \n", end);
-                            close(pfd[0]);
-                            FD_CLR(pfd[0], &set);
+                                else {
+                                    perror("main.slect");
+                                    exit(EXIT_FAILURE);
+                                }
+                            }                            
                         }
                         else {
                             char* buffer = malloc((REQUEST + DATA ) * sizeof(char));
@@ -1074,7 +1085,11 @@ int main(int argc, char *argv[]) {
         }
     }
     for(int i = 0; i < nThread; i++) {
-        pthread_join(workerIDArray[i], NULL);
+        if(pthread_join(workerIDArray[i], NULL) != 0) {
+            printf("ad");
+            perror("join");
+            exit(EXIT_FAILURE);
+        }
     }
     free(workerIDArray);
     //inizia a fare lavori di fine
