@@ -1,7 +1,7 @@
 CC 			= gcc
 CFLAGS		= -g -Wall 
 TARGETS		= server client
-.PHONY : clean test1
+.PHONY : clean test1 test2
 
 all : $(TARGETS)
 
@@ -14,4 +14,14 @@ client : client.c
 clean: 
 	rm $(TARGETS) socket log.txt
 
-test1:
+test1: $(TARGETS)
+	chmod +x ./test1.sh
+	./test1.sh
+	chmod +x ./statistica.sh
+	./statistica.sh
+
+test2: $(TARGET)
+	chmod +x ./test2.sh
+	./test2.sh
+	chmod +x ./statistica.sh
+	./statistica.sh

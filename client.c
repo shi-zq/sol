@@ -29,16 +29,32 @@ commandNode* headCommand = NULL; //FIFO
 int clientSocket = -1;
 char* nameSocket = NULL;
 
-long isNumber(const char* s){
+long isNumber(const char* s) {
     char* e = NULL;
     long val = strtol(s, &e, 0);
     if (e != NULL && *e == (char)0) return val;
     return -1;
 }
 
+void printHelp() {
+    printf("-h per stampre help \n");
+    printf("-f socketname \n");
+    printf("-w dirname,n \n");
+    printf("-W file1,file2,... \n");
+    printf("-D dirname \n");
+    printf("-r file1,file2,... \n");
+    printf("-R, n \n");
+    printf("-d dirname \n");
+    printf("-t millisecond \n");
+    printf("-l file1,file2,... \n");
+    printf("-u file1,file2,... \n");
+    printf("-c file1,file2,... \n");
+    printf("-p \n");
+}
+
 int setErrno(int result) {
     switch(result) {
-        case(-1): //errno settato da chiamate di funzione
+        case(-1): //errno settato da chiamante
             return -1;
         case(-2):
             errno = EEXIST; //file esistente
@@ -89,7 +105,7 @@ void add(char operation, char* path) {
     }
 }
 
-int compareTime(struct timespec endTime){
+int compareTime(struct timespec endTime) {
     struct timespec currTime;
     clock_gettime(CLOCK_REALTIME, &currTime);
     if(currTime.tv_sec < endTime.tv_sec) {
@@ -106,27 +122,27 @@ int compareTime(struct timespec endTime){
     return -1;
 }
 
-int openConnection(const char* socketName, int msec, const struct timespec endTime) {
+int openConnection(const char* socketname, int msec, const struct timespec abstime) { //abstime=fermarsi dopo RETRY_TIME
     struct sockaddr_un sa;
-    strncpy(sa.sun_path, socketName, UNIX_PATH_MAX);
+    strncpy(sa.sun_path, socketname, UNIX_PATH_MAX);
     sa.sun_family = AF_UNIX;
     if((clientSocket = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
         return setErrno(-1);
     }
     int connesso = 0;
-    while (compareTime(endTime) == 1 && connesso == 0){
+    while (compareTime(abstime) == 1 && connesso == 0){
         if(connect(clientSocket, (struct sockaddr *)&sa,sizeof(sa)) != -1) {
             connesso = 1;
         }
         sleep(msec/1000);
     }
     if(connesso == 1) {
-        nameSocket = malloc((strlen(socketName) + 1) * sizeof(char));
+        nameSocket = malloc((strlen(socketname) + 1) * sizeof(char));
         if(nameSocket == NULL) {
             perror("openConnecton.malloc");
             exit(EXIT_FAILURE);
         }
-        snprintf(nameSocket, strlen(socketName) + 1, "%s", socketName);
+        snprintf(nameSocket, strlen(socketname) + 1, "%s", socketname);
         return setErrno(0);
     }
     else {
@@ -178,13 +194,12 @@ int openFile(const char* pathname, int flags) {
 
 int writeFile(const char* pathname, const char* dirname) {
     FILE *fp;
-    char* absPath = NULL;
-    absPath = realpath(pathname, absPath);
     char data[DATA];
     char buffer[DATA];
     memset(data, 0, DATA);
     memset(buffer, 0, DATA);
-    data[0] = '\0';
+    char* absPath = NULL;
+    absPath = realpath(pathname, absPath);
     if(absPath == NULL) {
         return setErrno(-1);
     }
@@ -196,7 +211,7 @@ int writeFile(const char* pathname, const char* dirname) {
             strncat(data, buffer, strlen(buffer) + 1);
         }
         else {
-            return setErrno(-6);
+            return setErrno(-6); //file supera il limite del 1024
         }
     }
     fclose(fp);
@@ -213,13 +228,13 @@ int writeFile(const char* pathname, const char* dirname) {
         return setErrno(-1);
     }
     int result = atoi(answer);
-    char outFile[REQUEST + DATA];
-    char fileName[REQUEST];
     if(result >= 0) {
+        char outFile[REQUEST + DATA];
+        char fileName[REQUEST];
         while(result > 0) {
             memset(outFile, 0, REQUEST + DATA);
-            memset(fileName, 0, DATA);
-            if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
+            memset(fileName, 0, REQUEST);
+            if(read(clientSocket, outFile, REQUEST + DATA) == -1) {
                 return setErrno(-1);
             }
             if(dirname !=  NULL) {
@@ -234,7 +249,7 @@ int writeFile(const char* pathname, const char* dirname) {
                 token = strtok_r(NULL, ";", &save);
                 fprintf(file, "%s", token);
                 if(fclose(file) == -1) {
-                    return -1;
+                    return setErrno(-1);
                 }
             }
             result--;
@@ -247,12 +262,12 @@ int writeFile(const char* pathname, const char* dirname) {
 }
 
 int closeFile(const char* pathname) {
-    char* absPath = NULL;
-    absPath = realpath(pathname, absPath);
     char request[REQUEST];
     char answer[REQUEST];
     memset(request, 0, REQUEST);
     memset(answer, 0, REQUEST);
+    char* absPath = NULL;
+    absPath = realpath(pathname, absPath);
     if(absPath == NULL) {
         return setErrno(-1);
     }
@@ -269,16 +284,16 @@ int closeFile(const char* pathname) {
 }
 
 int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname) {
+    char request[REQUEST + DATA];
+    char answer[REQUEST];
+    memset(request, 0, REQUEST + DATA);
+    memset(answer, 0, REQUEST);
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    char request[REQUEST + DATA];
-    memset(request, 0, REQUEST + DATA);
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
-    snprintf(request, REQUEST, "a;%s;%s", absPath, (char*)buf);
+    snprintf(request, REQUEST + DATA, "a;%s;%s", absPath, (char*)buf);
     free(absPath);
     if(write(clientSocket, request, REQUEST + DATA) == -1) {
         return setErrno(-1);
@@ -287,23 +302,16 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
         return setErrno(-1);
     }
     int result = atoi(answer);
-    char outFile[REQUEST + DATA];
-    char fileName[DATA];
     if(result >= 0) {
-        int saved;
-        if(dirname == NULL) {
-            saved = 0;
-        }
-        else {
-            saved = 1;
-        }
         while(result > 0) {
+            char outFile[REQUEST + DATA];
+            char fileName[DATA];
             memset(outFile, 0, REQUEST + DATA);
             memset(fileName, 0, DATA);
-            if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
+            if(read(clientSocket, outFile, REQUEST + DATA) == -1) {
                 return setErrno(-1);
             }
-            if(saved == 1) {
+            if(dirname != NULL) {
                 char* save = NULL;
                 char* token = NULL;
                 token = strtok_r(outFile, ";", &save);
@@ -326,12 +334,15 @@ int appendToFile(const char* pathname, void* buf, size_t size, const char* dirna
 }
 
 int readFile(const char* pathname, void** buf, size_t* size) {
+    char request[REQUEST];
+    char answer[REQUEST];
+    memset(request, 0, REQUEST);
+    memset(answer, 0, REQUEST);
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
+    if(absPath == NULL) {
+        return setErrno(-1);
+    }
     snprintf(request, REQUEST, "r;%s", absPath);
     free(absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
@@ -342,12 +353,13 @@ int readFile(const char* pathname, void** buf, size_t* size) {
     }
     int result = atoi(answer);
     if(result == 0) {
-        memset(answer, 0, DATA); //riutillizare answer per ricevere dati
-        if(read(clientSocket, answer, REQUEST) == -1) {
+        char outFile[DATA];
+        memset(outFile, 0, DATA);
+        if(read(clientSocket, outFile, REQUEST) == -1) {
             return setErrno(-1);
         }
-        char* data = malloc((strlen(answer) + 1) * sizeof(char));
-        snprintf(data, strlen(data) + 1, "%s", answer);
+        char* data = malloc((strlen(outFile) + 1) * sizeof(char));
+        snprintf(data, strlen(data) + 1, "%s", outFile);
         *size = strlen(data);
         *buf = (void*)data;
     }
@@ -356,10 +368,10 @@ int readFile(const char* pathname, void** buf, size_t* size) {
 
 int readNFiles(int n, const char* dirname) {
     char request[REQUEST];
-    memset(request, 0, REQUEST);
     char answer[REQUEST];
+    memset(request, 0, REQUEST);
     memset(answer, 0, REQUEST);
-    snprintf(request, REQUEST, "%d", n);
+    snprintf(request, REQUEST, "R;%d", n);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
@@ -367,23 +379,16 @@ int readNFiles(int n, const char* dirname) {
         return setErrno(-1);
     }
     int result = atoi(answer);
-    char outFile[REQUEST + DATA];
-    char fileName[DATA];
-    if(result >= 0) {
-        int saved;
-        if(dirname == NULL) {
-            saved = 0;
-        }
-        else {
-            saved = 1;
-        }
+    if(result > 0) {
+        char outFile[REQUEST + DATA];
+        char fileName[DATA];
         while(result > 0) {
             memset(outFile, 0, REQUEST + DATA);
             memset(fileName, 0, DATA);
-            if(read(clientSocket, outFile, REQUEST + DATA) == -1) { //leggere il nome del file
+            if(read(clientSocket, outFile, REQUEST + DATA) == -1) {
                 return setErrno(-1);
             }
-            if(saved == 1) {
+            if(dirname != NULL) {
                 char* save = NULL;
                 char* token = NULL;
                 token = strtok_r(outFile, ";", &save);
@@ -394,7 +399,9 @@ int readNFiles(int n, const char* dirname) {
                 }
                 token = strtok_r(NULL, ";", &save);
                 fprintf(file, "%s", token);
-                fclose(file);
+                if(fclose(file) == -1) {
+                    return setErrno(-1);
+                }
             }
             result--;
         }
@@ -403,16 +410,15 @@ int readNFiles(int n, const char* dirname) {
     else {
         return setErrno(result);
     }
-
 }
 
 int lockFile(const char* pathname) {
+    char request[REQUEST];
+    char answer[REQUEST];
+    memset(request, 0, REQUEST);
+    memset(answer, 0, REQUEST);
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(absPath == NULL) {
         return setErrno(-1);
     }
@@ -426,17 +432,18 @@ int lockFile(const char* pathname) {
     int result = atoi(answer);
     return setErrno(result);
 }
+
 int unlockFile(const char* pathname) {
+    char request[REQUEST];
+    char answer[REQUEST];
+    memset(request, 0, REQUEST);
+    memset(answer, 0, REQUEST);
     char* absPath = NULL;
     absPath = realpath(pathname, absPath);
-    char request[REQUEST];
-    memset(request, 0, REQUEST);
-    char answer[REQUEST];
-    memset(answer, 0, REQUEST);
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    snprintf(request, strlen(absPath) + 3, "u;%s", absPath);
+    snprintf(request, REQUEST, "u;%s", absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
@@ -448,11 +455,11 @@ int unlockFile(const char* pathname) {
 }
 
 int removeFile(const char* pathname) {
-    char* absPath = NULL;
     char request[REQUEST];
-    memset(request, 0, REQUEST);
     char answer[REQUEST];
+    memset(request, 0, REQUEST);
     memset(answer, 0, REQUEST);
+    char* absPath = NULL;
     absPath = realpath(pathname, absPath);
     if(absPath == NULL) {
         return setErrno(-1);
@@ -488,14 +495,14 @@ void writeNFiles(char* dirName, int* n) { // se n \`e negatovo scrive tutti i fi
         }
         if(S_ISDIR(info.st_mode)) {
             if (strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0) {
-                //non faccio niente
+                //non faccio niente per evitare il ciclo infinito
             }
             else {
-                writeNFiles(path , n); //chiamo la funzione su questo
+                writeNFiles(path , n); //chiamo la funzione su questa dir
             }
         }
         else {
-            add('w', path);
+            add('w', path); // e un file 
             (*n)--;
         }
     }
@@ -510,18 +517,21 @@ int main(int argc, char *argv[]) {
     char opt = 0;
     int connected = 0;
     int t = 0;
-    int p = 1;
+    int p = 0;
+    int w = 0;
+    int r = 0;
     char* save;
     char* token;
     char* token2;
-    char* dirD = NULL;
-    char* dird = NULL;
+    char* dirD = NULL; //per write
+    char* dird = NULL; //per read
     int n;
     DIR* dir = NULL;
     while((opt = (char)getopt(argc, argv, "hf:W:w:D:d:r:R:l:u:c:t:p")) != -1) {
         switch (opt) {
             case('h'):
-                printf("help \n");
+                printHelp();
+                exit(EXIT_SUCCESS);
                 break;
             case('f'):
                 struct timespec abstime;
@@ -540,7 +550,7 @@ int main(int argc, char *argv[]) {
                 t = atoi(optarg);
                 break;
             case('p'):
-                p = 0;
+                p = 1;
                 break;
             case('W'):
                 token = strtok_r(optarg, ",", &save);
@@ -548,6 +558,7 @@ int main(int argc, char *argv[]) {
                     add('w', token);
                     token = strtok_r(NULL, ",", &save);
                 }
+                w = 1;
                 break;
             case('w'):
                 token = strtok_r(optarg, ",", &save);
@@ -561,6 +572,7 @@ int main(int argc, char *argv[]) {
                     n = -1;
                 }
                 writeNFiles(token, &n);
+                w = 1;
                 break;
             case('D'):
                 dir = opendir(optarg);
@@ -570,7 +582,7 @@ int main(int argc, char *argv[]) {
                 }
                 dirD = realpath(optarg, dirD);
                 if(dirD == NULL) {
-                    perror("main.malloc");
+                    perror("main.realpath");
                     exit(EXIT_FAILURE);
                 }
                 closedir(dir);
@@ -581,9 +593,21 @@ int main(int argc, char *argv[]) {
                     add('r', token);
                     token = strtok_r(NULL, ",", &save);
                 }
+                r = 1;
                 break;
             case('R'):
-                add('R', optarg);
+                n = isNumber(optarg);
+                if(n <= -1) {
+                    printf(" main.errore nel n -R \n");
+                    exit(EXIT_FAILURE);
+                }
+                if(n == 0) {
+                    add('R', "-1");
+                }
+                else {
+                    add('R', optarg);
+                }
+                r = 1;
                 break;    
             case('d'):
                 dir = opendir(optarg);
@@ -593,7 +617,7 @@ int main(int argc, char *argv[]) {
                 }
                 dird = realpath(optarg, dird);
                 if(dird == NULL) {
-                    perror("main.malloc");
+                    perror("main.realpath");
                     exit(EXIT_FAILURE);
                 }
                 closedir(dir);
@@ -606,11 +630,20 @@ int main(int argc, char *argv[]) {
                 break;
             case('c'):
                 add('d', optarg);
+                break;
             default:
-                printf("default \n");
+                printHelp();
                 exit(EXIT_FAILURE);
                 break;
         }
+    }
+    if(w == 0 && dirD != NULL) {
+        printf("D ha bisogno di operazione di write \n");
+        connected = 0;
+    }
+    if(r == 0 && dird != NULL) {
+        printf("d ha bisogno di operazione di read \n");
+        connected = 0;
     }
     printf("inizio inviare commandi \n");
     if(connected == 1) {
@@ -663,7 +696,10 @@ int main(int argc, char *argv[]) {
                                     perror("main.strlen");
                                 }
                             }
-                            fclose(append);
+                            if(fclose(append) == -1) {
+                                perror("main.fclose");
+                                exit(EXIT_FAILURE);
+                            }
                             result = appendToFile(headCommand->path, data, strlen(data), dirD);
                             if(p == 1) {
                                 printf("appendToFile(%s, %s, %ld, %s) : %d \n", headCommand->path, data, strlen(data), dirD, result);
@@ -691,35 +727,28 @@ int main(int argc, char *argv[]) {
                         printf("readFile(%s, %s, %ld) : %d \n", headCommand->path, buf, size, result);
                     }
                     if(dird != NULL) {
-                        char* rsave = NULL;
-                        char* rtoken = NULL;
-                        char outFile[REQUEST + DATA];
                         char fileName[DATA];
-                        memset(outFile, 0, REQUEST + DATA);
                         memset(fileName, 0, DATA);
-                        rtoken = strtok_r(outFile, ";", &rsave);
-                        snprintf(fileName, DATA, "%s/%s", dird, basename(token));
+                        snprintf(fileName, DATA, "%s/%s", dird, basename(headCommand->path));
                         FILE* file = fopen(fileName, "w");
                         if(file == NULL) {
                             perror("main.fopen");
                             exit(EXIT_FAILURE);
                         }
-                        rtoken = strtok_r(NULL, ";", &rsave);
-                        fprintf(file, "%s", rtoken);
+                        fprintf(file, "%s", buf);
                         fclose(file);
                     }
                     free(buf);
                     break;
                 case('R'):
-                    n = isNumber(headCommand->path);
-                    if(n <= -1) {
-                        printf(" main.errore nel n -R \n");
-                        exit(EXIT_FAILURE);
+                    n = atoi(headCommand->path);
+                    result = readNFiles(n, dird);
+                    if(n == -1) {
+                        n = 0;
                     }
-                    if(n == 0) {
-                        n = -1;
+                    if(p == 1) {
+                        printf("readNfiles(%d, %s) : %d \n", n, dird, result);
                     }
-                    readNFiles(n, dird);
                     break;
                 case('l'):
                     result = lockFile(headCommand->path);
@@ -755,12 +784,12 @@ int main(int argc, char *argv[]) {
             free(tmp);
         }
         if(closeConnection(nameSocket) == -1) {
-            printf("errore nel closeConnection \n");
+            printf("main.Closeconnection \n");
             exit(EXIT_FAILURE);
         }
     }
     else {
-        printf("help \n");
+        printHelp();
     }
     free(dirD);
     free(dird);
