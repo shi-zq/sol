@@ -71,9 +71,6 @@ int setErrno(int result) {
         case(-6):
             errno = EFBIG; //file troppo grande
             return -1;
-        case(-7):
-            errno = ENOTCONN; //errore di connessione
-            return -1;
         default:
             return result;
     }
@@ -464,7 +461,7 @@ int removeFile(const char* pathname) {
     if(absPath == NULL) {
         return setErrno(-1);
     }
-    snprintf(request, REQUEST, "C;%s", absPath);
+    snprintf(request, REQUEST, "x;%s", absPath);
     if(write(clientSocket, request, REQUEST) == -1) {
         return setErrno(-1);
     }
@@ -544,7 +541,6 @@ int main(int argc, char *argv[]) {
                     perror("openConnection");
                     exit(EXIT_FAILURE);
                 }
-                printf("connesso \n");
 			    break;
             case('t'):
                 t = atoi(optarg);
@@ -629,7 +625,7 @@ int main(int argc, char *argv[]) {
                 add('u', optarg);
                 break;
             case('c'):
-                add('d', optarg);
+                add('x', optarg);
                 break;
             default:
                 printHelp();
@@ -645,7 +641,6 @@ int main(int argc, char *argv[]) {
         printf("d ha bisogno di operazione di read \n");
         connected = 0;
     }
-    printf("inizio inviare commandi \n");
     if(connected == 1) {
         while(headCommand != NULL) {
             if(t != 0) {
@@ -768,7 +763,7 @@ int main(int argc, char *argv[]) {
                         printf("unlockFile(%s) : %d \n", headCommand->path, result);
                     }
                     break;
-                case('d'):
+                case('x'):
                     result = removeFile(headCommand->path);
                     if(result < 0) {
                         perror("main.removeFile");
@@ -793,7 +788,7 @@ int main(int argc, char *argv[]) {
     }
     free(dirD);
     free(dird);
-    printf("fine \n");
+    //printf("fine \n");
     return 0;
 
 }

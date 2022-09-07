@@ -1,73 +1,78 @@
 #!/bin/bash
 LOG=./log.txt
 
+if [ ! -f "$LOG" ]; then
+    echo "$LOG non esiste"
+    exit
+fi
+
 #parte write
 writes=$(grep -c "op=writeFile" "$LOG")
 appends=$(grep -c "op=appendToFile" "$LOG")
 echo "WRITE TOTALI: $writes"
 echo "APPEND TOTALI: $appends"
 declare -i tot=0
-wsum=$(grep "op=writeFile" "$LOG" | grep "answer=0" | cut -d ';' -f4 | cut -d '=' -f2 )
-asum=$(grep "op=appendToFile" "$LOG" | grep "answer=0" | cut -d ';' -f4 | cut -d '=' -f2 )
-wtimes=$(grep "op=writeFile" "$LOG" | grep -c "answer=0")
-atimes=$(grep "op=appendToFile" "$LOG" | grep -c "answer=0")
+wsum=$(grep "op=writeFile" "$LOG" | cut -d ';' -f4 | cut -d '=' -f2)
+asum=$(grep "op=appendToFile" "$LOG" | cut -d ';' -f4 | cut -d '=' -f2)
+wtimes=$(grep -c "op=writeFile" "$LOG")
+atimes=$(grep -c "op=appendToFile" "$LOG")
 for num in $wsum
     do 
-        tot=$(($tot + $num))
+    tot=$((tot + num))
     done
 for num in $asum
     do 
-        tot=$(($tot + $num))
+    tot=$((tot + num))
     done
 times=$(($wtimes+$atimes))
 if [ "$times" -eq "0" ]; then
-echo "write byte totale: $tot"
-echo "media byte write: 0";
+    echo "WRITE BYTE TOTALE: $tot"
+    echo "MEDIA BYTE WRITE 0";
 else
-echo "write byte totale: $tot"
-media=$(echo "scale=2; ${tot} / ${times}" | bc -l)
-echo "media byte write: " $media
+    echo "WRITE BYTE TOTALE: $tot"
+    media=$(($tot / $times))
+    echo "MEDIA BYTE WRITE: " $media
 fi
 
 #parte read
 reads=$(grep -c "op=read" "$LOG")
-echo "READ totali: $reads"
+echo "READ TOTALI: $reads"
 declare -i tot=0
 declare -i times=0
-sum=$(grep "op=read" "$LOG" | grep "answer=0" | cut -d ';' -f3 | cut -d '=' -f2 )
-times=$(grep "op=read" "$LOG" | grep -c "answer=0")
+sum=$(grep "op=read" "$LOG" | cut -d ';' -f3 | cut -d '=' -f2 )
+times=$(grep -c "op=read" "$LOG")
 for num in $sum
     do 
-        tot=$(($tot + $num))
+    tot=$((tot + num))
     done
 
 if [ "$times" -eq "0" ]; then
-echo "read byte totale: $tot"
-echo "media byte read: 0";
+    echo "READ BYTE TOTALE: $tot"
+    echo "MEDIA BYTE READ: 0";
 else
-echo "read byte totale: $tot"
-media=$(echo "scale=2; ${tot} / ${times}" | bc -l)
-echo "media byte read: " $media
+    echo "READ BYTE TOTALE: $tot"
+    media=$(($tot / $times))
+    echo "MEDIA BYTE READ: " $media
 fi
 
 #parte lock
 locks=$(grep -c "op=lockFile" "$LOG")
-echo "LOCK totali: $locks"
+echo "LOCK TOTALI: $locks"
 
 #parte unlock
 unlocks=$(grep -c "op=unlockFile" "$LOG")
-echo "UNLOCK totali: $unlocks"
+echo "UNLOCK TOTALI: $unlocks"
 
 #parte openlock
 openlocks=$(grep -c "op=openFile" "$LOG")
-echo "OPEN-LOCK totali: $openlocks"
+echo "OPEN-LOCK TOTALI: $openlocks"
 
 #parte close
 closes=$(grep -c "op=closeFile" "$LOG")
-echo "CLOSE totali: $closes"
+echo "CLOSE TOTALI: $closes"
 #parte out
 outs=$(grep -c "op=out" "$LOG")
-echo "OUT totali: $outs"
+echo "OUT TOTALI: $outs"
 
 #MB raggiunti file raggiunti connessioni raggiunti
 declare -i bytes_balance=0;
@@ -99,7 +104,7 @@ do
             fi
             ;;
         "out")
-            add_bytes=$(echo "$line" | cut -d ';' -f4 | cut -d '=' -f2)
+            add_bytes=$(echo "$line" | cut -d ';' -f3 | cut -d '=' -f2)
             bytes_balance=$((bytes_balance-add_bytes))
             files_balance=$((files_balance-1))
             ;;
@@ -116,9 +121,9 @@ do
     esac
 done < "$LOG"
 echo "MAX BYTE HIT: $max_bytes"
-echo "MAX FILE HIT:$max_files"
+echo "MAX FILE HIT: $max_files"
 echo "MAX CONNECTION HIT: $max_connections"
 
 #lavoro di ogni thread worker
-thread_ids=$(grep -v "thread=main" "$LOG" | sort | cut -d ';' -f1 | uniq -c)
+thread_ids=$(grep -v "thread=-1" "$LOG" | sort | cut -d ';' -f1 | uniq -c)
 echo "$thread_ids"

@@ -34,7 +34,7 @@ int maxStorageSize = 3*1024; // massimo capacita
 int currentNumber = 0; //numero di file corrente
 int currentSize = 0; //numero di capacita usato
 
-int maxFileNumberHit = 0;
+int maxFileNumberHit = 0; //massimi raggiunti
 int maxStorageSizeHit = 0;
 int outFile = 0;
 
@@ -483,7 +483,7 @@ void appendToFile(int clientSocketNumber, char* path, char* data) {
             found = 1;
             if(tmp->clientSocketNumber == -1 || tmp->clientSocketNumber == clientSocketNumber) {
                 if(strlen(data) + strlen(tmp->data) < 1024) {
-                    if(currentSize + strlen(data) + 1 > maxStorageSize) {
+                    if(currentSize + strlen(data) > maxStorageSize) {
                         fileNode* tmp1 = headFile;
                         int success = 0;
                         int freeSpace = 0;
@@ -767,7 +767,7 @@ void removeFileNode(int clientSocketNumber, char* path) {
     while(tmp != NULL && found == 0) {
         if(strcmp(tmp->abspath, path) == 0) {
             found = 1;
-            if(tmp->clientSocketNumber == clientSocketNumber) {
+            if(tmp->clientSocketNumber == clientSocketNumber || tmp->clientSocketNumber == -1) {
                 if(prev == NULL) {
                     headFile = tmp->next;
                 }
@@ -873,7 +873,7 @@ void *worker() {
                     token2 = strtok_r(NULL, ";", &save);;
                     unlockFileNode(clientSocketNumber, token2);
                     break;
-                case('d'):
+                case('x'):
                     token2 = strtok_r(NULL, ";", &save);
                     removeFileNode(clientSocketNumber, token2);
                     break;
@@ -1018,7 +1018,7 @@ int main(int argc, char *argv[]) {
                         }
                         currConnection++;
                         pthread_mutex_lock(&fileLog);
-                        fprintf(flog, "thread=main;op=openConnection;read=0;write=0;path=NULL;answer=0 \n");
+                        fprintf(flog, "thread=-1;op=openConnection;read=0;write=0;path=NULL;answer=0 \n");
                         pthread_mutex_unlock(&fileLog);
                     }
                     else {
@@ -1087,7 +1087,9 @@ int main(int argc, char *argv[]) {
     fileNode* tmpFree = NULL;
     while(headFile != NULL) {
         tmpFree = headFile;
-        printf("%s : %s \n", headFile->abspath, headFile->data);
+        if(headFile->data != NULL) {
+            printf("%s : %s \n", headFile->abspath, headFile->data);
+        }
         headFile = headFile->next;
         free(tmpFree->abspath);
         free(tmpFree->data);
